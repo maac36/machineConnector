@@ -78,6 +78,20 @@ def display_execution_results(state: Dict[str, Any]) -> None:
     """
     result = state.get("execution_result", {})
 
+    # Show retry attempts if any
+    auto_retry_count = state.get("auto_retry_count", 0)
+    if auto_retry_count > 0:
+        console.print(f"\n[cyan]🔄 Auto-retry attempts: {auto_retry_count}[/cyan]")
+
+        # Show failure analysis if available
+        failure_analysis = state.get("failure_analysis")
+        if failure_analysis:
+            console.print(f"[dim]Failure reason: {failure_analysis.get('failure_reason', 'Unknown')}[/dim]")
+            console.print(f"[dim]Root cause: {failure_analysis.get('root_cause', 'Unknown')}[/dim]")
+            if failure_analysis.get('explanation'):
+                console.print(f"[dim]Fix applied: {failure_analysis.get('explanation')}[/dim]")
+        console.print()
+
     # Status
     status = state.get("execution_status", "unknown")
     if status == "success":

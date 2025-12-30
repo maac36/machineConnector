@@ -22,6 +22,9 @@ class Settings(BaseSettings):
 
     # Retry Configuration
     max_retries: int = Field(3, env="MAX_RETRIES")
+    enable_auto_retry: bool = Field(True, env="ENABLE_AUTO_RETRY")  # Auto-retry on failures
+    max_auto_retries: int = Field(2, env="MAX_AUTO_RETRIES")  # Number of automatic retry attempts
+    auto_retry_confidence_threshold: str = Field("medium", env="AUTO_RETRY_CONFIDENCE_THRESHOLD")  # Minimum confidence to auto-retry (low/medium/high)
 
     # Security Configuration
     enable_dangerous_commands: bool = Field(False, env="ENABLE_DANGEROUS_COMMANDS")

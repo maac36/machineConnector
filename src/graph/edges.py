@@ -32,22 +32,29 @@ def route_after_confirmation(
 
 def route_after_execution(
     state: CommandState
-) -> Literal["validate_result", "present_result", "try_alternative_shell"]:
+) -> Literal["validate_result", "present_result", "try_alternative_shell", "intelligent_retry"]:
     """
     Route based on execution status.
 
     Logic:
+    - next_step is "intelligent_retry": analyze failure and retry with corrected command
     - next_step is "try_alternative": try alternative shell
     - Success or Failed: validate results
     - Error: skip validation and go to presentation
     """
 
-    # Check if we should try alternative shell
+    # Check next_step for explicit routing
     next_step = state.get("next_step")
+
+    if next_step == "intelligent_retry":
+        logger.debug("Routing to intelligent_retry (will analyze and fix failure)")
+        return "intelligent_retry"
+
     if next_step == "try_alternative":
         logger.debug("Routing to try_alternative_shell (execution failed)")
         return "try_alternative_shell"
 
+    # Check execution status
     status = state.get("execution_status")
 
     if status in ["success", "failed"]:

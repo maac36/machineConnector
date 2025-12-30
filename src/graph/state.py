@@ -48,6 +48,10 @@ class CommandState(TypedDict):
     error_type: Optional[str]  # Error category
     retry_count: int  # Number of retries attempted
     max_retries: int  # Maximum retries allowed
+    auto_retry_count: int  # Number of automatic retry attempts
+    max_auto_retries: int  # Maximum auto-retries allowed
+    failure_analysis: Optional[Dict[str, Any]]  # LLM analysis of failure
+    failed_attempts: Annotated[List[Dict[str, Any]], add]  # History of failed attempts
 
     # History and Context (using reducer for appending)
     messages: Annotated[List[Dict[str, Any]], add]  # Conversation history

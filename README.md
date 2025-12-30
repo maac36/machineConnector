@@ -8,6 +8,7 @@ A Python-based LangGraph system that uses LLM to generate PowerShell commands fr
 - **🎤 Voice Input**: Speak your commands using Whisper speech-to-text (API or local models)
 - **📊 Content Analysis**: Read files, analyze code, and understand repositories using LLM
 - **💾 Conversation Memory**: Remembers last 5 conversations for context-aware follow-up questions
+- **🔄 Intelligent Auto-Retry**: LLM automatically analyzes failures and retries with corrected commands
 - **Multi-Shell Support**: Automatic fallback between PowerShell, CMD, and Bash
 - **Human-in-the-Loop**: Requires user confirmation before executing any command
 - **Security-First**: Multi-layer safety checks including pattern matching and LLM safety assessment
@@ -188,6 +189,87 @@ CONTEXT_CONVERSATIONS_COUNT=3           # How many to include (1-5)
 - **Reference previous results**: "Use that folder", "the same file"
 - **Contextual understanding**: LLM knows what you were doing
 - **Natural conversation flow**: No need to repeat context
+
+### Intelligent Auto-Retry 🔄
+
+When commands fail, the LLM **automatically analyzes the error and retries** with a corrected command!
+
+**How It Works:**
+```
+1. Command fails with error
+    ↓
+2. LLM analyzes:
+   - Why did it fail?
+   - What's the root cause?
+   - How to fix it?
+    ↓
+3. Generate corrected command
+    ↓
+4. Auto-retry (up to 2 times)
+    ↓
+5. Success! ✓
+```
+
+**Example: Automatic Error Correction**
+```
+User: "list files in a folder that doesn't exist"
+
+Generated Command:
+  Get-ChildItem C:\NonExistentFolder
+
+Execute this command? [y/n]: y
+
+⚠ Execution Status: FAILED
+Error: Cannot find path 'C:\NonExistentFolder'
+
+🔄 Auto-retry attempts: 1
+Failure reason: Path does not exist
+Root cause: file_not_found
+Fix applied: Changed to list current directory instead
+
+✓ Execution Status: SUCCESS
+Output: [files in current directory]
+```
+
+**Failure Types Handled:**
+- **Syntax Errors**: Fixes command syntax issues
+- **Permission Denied**: Suggests elevated commands or alternatives
+- **File Not Found**: Corrects paths or suggests alternatives
+- **Invalid Arguments**: Fixes parameter errors
+- **Timeout Issues**: Optimizes slow commands
+- **Command Not Found**: Suggests correct command names
+
+**Configuration:**
+```env
+ENABLE_AUTO_RETRY=true                    # Enable intelligent retry
+MAX_AUTO_RETRIES=2                        # Max automatic attempts (1-5)
+AUTO_RETRY_CONFIDENCE_THRESHOLD=medium    # Minimum confidence (low/medium/high)
+```
+
+**Confidence Levels:**
+- **High**: LLM is very confident in the fix (always retry)
+- **Medium**: Likely to work (retry if threshold allows)
+- **Low**: Uncertain fix (only retry if threshold is low)
+
+**Multi-Attempt Strategy:**
+- **Attempt 1**: Standard error correction
+- **Attempt 2**: Alternative approach if first fix fails
+- **Attempt 3+**: Try different shell (PowerShell → CMD → Bash)
+
+**Example: Multiple Retries**
+```
+Attempt 1 (PowerShell): Permission denied
+  ↓ LLM Analysis: Needs admin rights
+  ↓ Fix: Add -RunAsAdministrator... Failed
+
+Attempt 2 (PowerShell): Try alternative approach
+  ↓ LLM Analysis: Use different method
+  ↓ Fix: Use WMI instead... Failed
+
+Attempt 3 (CMD): Switch shell
+  ↓ LLM Analysis: CMD has different permissions
+  ↓ Fix: Run via cmd.exe... Success! ✓
+```
 
 ### Example Session
 

@@ -10,6 +10,7 @@ from tools.command_executor import PowerShellExecutor
 from tools.result_validator import ResultValidator
 from tools.content_analyzer import ContentAnalyzer
 from tools.file_reader import FileReader
+from tools.failure_analyzer import FailureAnalyzer
 from security.command_filter import CommandFilter
 from config.settings import settings
 from langgraph.types import interrupt
@@ -41,6 +42,12 @@ content_analyzer = ContentAnalyzer(
 )
 
 file_reader = FileReader(max_file_size=10 * 1024 * 1024)  # 10MB max
+
+failure_analyzer = FailureAnalyzer(
+    api_key=settings.openai_api_key,
+    model=settings.openai_model,
+    temperature=settings.openai_temperature
+)
 
 command_filter = CommandFilter()
 
@@ -240,23 +247,61 @@ async def execute_command_node(state: CommandState) -> Dict[str, Any]:
 
         logger.info(f"Execution {status}: return_code={result['return_code']}, shell={shell_type}")
 
-        # If failed and haven't tried alternatives, try alternative shell
-        attempted_shells = state.get("attempted_shells", [])
-        if has_error and shell_type not in attempted_shells:
-            logger.info(f"Execution failed with {shell_type}, will try alternative shell")
+        # If succeeded, proceed to validation
+        if not has_error:
             return {
                 "execution_status": status,
                 "execution_result": result,
                 "execution_timestamp": datetime.now(),
                 "attempted_shells": [shell_type],
+                "next_step": "validate"
+            }
+
+        # Execution failed - decide whether to auto-retry or try alternative shell
+        auto_retry_count = state.get("auto_retry_count", 0)
+        max_auto_retries = state.get("max_auto_retries", settings.max_auto_retries)
+        attempted_shells = state.get("attempted_shells", [])
+
+        # Record this failed attempt
+        failed_attempt = {
+            "command": state["generated_command"],
+            "error": result.get("stderr", "") or result.get("error", "Unknown error"),
+            "return_code": result.get("return_code", -1),
+            "shell_type": shell_type
+        }
+
+        # Check if we should try intelligent auto-retry
+        if settings.enable_auto_retry and auto_retry_count < max_auto_retries:
+            logger.info(f"Execution failed, will attempt intelligent retry ({auto_retry_count + 1}/{max_auto_retries})")
+            return {
+                "execution_status": status,
+                "execution_result": result,
+                "execution_timestamp": datetime.now(),
+                "attempted_shells": [shell_type],
+                "failed_attempts": [failed_attempt],
+                "next_step": "intelligent_retry"
+            }
+
+        # If auto-retries exhausted, try alternative shell
+        if shell_type not in attempted_shells:
+            logger.info(f"Auto-retries exhausted, will try alternative shell")
+            return {
+                "execution_status": status,
+                "execution_result": result,
+                "execution_timestamp": datetime.now(),
+                "attempted_shells": [shell_type],
+                "failed_attempts": [failed_attempt],
                 "next_step": "try_alternative"
             }
 
+        # All options exhausted, proceed to validation (will show failure)
+        logger.warning("All retry options exhausted, proceeding with failure")
         return {
             "execution_status": status,
             "execution_result": result,
             "execution_timestamp": datetime.now(),
             "attempted_shells": [shell_type],
+            "failed_attempts": [failed_attempt],
             "next_step": "validate"
         }
 
@@ -498,6 +543,122 @@ async def analyze_content_node(state: CommandState) -> Dict[str, Any]:
         return {
             "error_message": f"Analysis failed: {str(e)}",
             "error_type": "analysis_error",
+            "next_step": "present"
+        }
+
+
+async def intelligent_retry_node(state: CommandState) -> Dict[str, Any]:
+    """
+    Use LLM to analyze failure and automatically generate a corrected command.
+
+    Flow:
+    1. Analyze why the command failed using LLM
+    2. Generate corrected command based on analysis
+    3. Increment retry counter
+    4. Return to execution with new command
+    """
+
+    logger.info("Node: intelligent_retry")
+
+    auto_retry_count = state.get("auto_retry_count", 0) + 1
+
+    try:
+        # Get failure details
+        execution_result = state.get("execution_result", {})
+        failed_command = state.get("generated_command")
+        error_output = execution_result.get("stderr", "") or execution_result.get("error", "Unknown error")
+        return_code = execution_result.get("return_code", -1)
+        shell_type = state.get("shell_type", "powershell")
+
+        # Get previous failed attempts
+        failed_attempts = state.get("failed_attempts", [])
+
+        logger.info(f"Analyzing failure (attempt {auto_retry_count}): {error_output[:200]}")
+
+        # Analyze the failure using LLM
+        if execution_result.get("timed_out"):
+            # Special handling for timeouts
+            analysis = await failure_analyzer.analyze_execution_timeout(
+                user_intent=state["user_input"],
+                command=failed_command,
+                timeout_seconds=settings.max_execution_timeout
+            )
+        elif auto_retry_count > 1 and len(failed_attempts) > 1:
+            # Multiple failures - suggest alternative approach
+            analysis = await failure_analyzer.suggest_alternative_approach(
+                user_intent=state["user_input"],
+                failed_attempts=failed_attempts,
+                shell_type=shell_type
+            )
+        else:
+            # Standard failure analysis
+            analysis = await failure_analyzer.analyze_failure(
+                user_intent=state["user_input"],
+                failed_command=failed_command,
+                error_output=error_output,
+                return_code=return_code,
+                shell_type=shell_type,
+                previous_attempts=failed_attempts[:-1] if len(failed_attempts) > 1 else None
+            )
+
+        logger.info(f"Failure analysis: {analysis.get('failure_reason')}")
+        logger.info(f"Root cause: {analysis.get('root_cause')}")
+        logger.info(f"Suggested fix: {analysis.get('corrected_command')}")
+
+        # Check if we should retry based on confidence and should_retry flag
+        corrected_command = analysis.get("corrected_command")
+        should_retry = analysis.get("should_retry", False)
+        confidence = analysis.get("confidence", "low")
+
+        # Confidence threshold check
+        confidence_levels = {"low": 0, "medium": 1, "high": 2}
+        threshold_level = confidence_levels.get(settings.auto_retry_confidence_threshold, 1)
+        current_level = confidence_levels.get(confidence, 0)
+
+        if not corrected_command or not should_retry or current_level < threshold_level:
+            logger.warning(f"Analysis suggests not to retry (confidence: {confidence}, should_retry: {should_retry})")
+            return {
+                "auto_retry_count": auto_retry_count,
+                "failure_analysis": analysis,
+                "error_message": f"Auto-retry stopped: {analysis.get('failure_reason')}",
+                "next_step": "present"
+            }
+
+        # Assess safety of corrected command
+        safety_assessment = command_filter.assess(corrected_command)
+
+        if not safety_assessment["allow"]:
+            logger.warning("Corrected command blocked by safety filter")
+            return {
+                "auto_retry_count": auto_retry_count,
+                "failure_analysis": analysis,
+                "error_message": "Corrected command failed safety check",
+                "next_step": "present"
+            }
+
+        # Update state with corrected command and retry
+        logger.info(f"Retrying with corrected command (attempt {auto_retry_count})")
+
+        return {
+            "generated_command": corrected_command,
+            "command_explanation": f"Auto-retry {auto_retry_count}: {analysis.get('explanation')}",
+            "safety_assessment": {
+                "level": safety_assessment["level"],
+                "warnings": safety_assessment.get("warnings", []),
+                "allow": safety_assessment["allow"]
+            },
+            "auto_retry_count": auto_retry_count,
+            "failure_analysis": analysis,
+            "user_confirmed": True,  # Auto-confirm retry attempts
+            "next_step": "execute"
+        }
+
+    except Exception as e:
+        logger.error(f"Intelligent retry failed: {e}")
+        return {
+            "auto_retry_count": auto_retry_count,
+            "error_message": f"Retry analysis failed: {str(e)}",
+            "error_type": "retry_error",
             "next_step": "present"
         }
 

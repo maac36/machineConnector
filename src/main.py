@@ -281,6 +281,10 @@ class PowerShellCLI:
             "error_type": None,
             "retry_count": 0,
             "max_retries": settings.max_retries,
+            "auto_retry_count": 0,
+            "max_auto_retries": settings.max_auto_retries,
+            "failure_analysis": None,
+            "failed_attempts": [],
             "messages": [],
             "execution_history": [],
             "conversation_messages": conversation_messages,  # Add conversation context

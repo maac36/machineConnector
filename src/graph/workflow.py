@@ -11,7 +11,8 @@ from graph.nodes import (
     present_result_node,
     retry_node,
     try_alternative_shell_node,
-    analyze_content_node
+    analyze_content_node,
+    intelligent_retry_node
 )
 from graph.edges import (
     route_after_confirmation,
@@ -48,6 +49,7 @@ def create_workflow():
     workflow.add_node("validate_result", validate_result_node)
     workflow.add_node("present_result", present_result_node)
     workflow.add_node("retry_node", retry_node)
+    workflow.add_node("intelligent_retry", intelligent_retry_node)
     workflow.add_node("try_alternative_shell", try_alternative_shell_node)
     workflow.add_node("analyze_content", analyze_content_node)
 
@@ -76,9 +78,13 @@ def create_workflow():
         {
             "validate_result": "validate_result",
             "present_result": "present_result",
+            "intelligent_retry": "intelligent_retry",
             "try_alternative_shell": "try_alternative_shell"
         }
     )
+
+    # After intelligent retry, go back to execute with corrected command
+    workflow.add_edge("intelligent_retry", "execute_command")
 
     # After validation, check if analysis is needed
     def route_after_validation(state: CommandState):
