@@ -1,0 +1,36 @@
+# Core LangGraph and LangChain
+langgraph==0.2.55
+langchain==0.3.20
+langchain-openai==0.2.14
+
+# OpenAI
+openai==1.59.7
+
+# Configuration Management
+pydantic==2.10.6
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+
+# CLI Interface
+rich==14.0.0
+prompt-toolkit==3.0.48
+
+# Async Support
+aiohttp==3.11.11
+
+# Audio/Voice Support
+sounddevice==0.5.1
+soundfile==0.12.1
+numpy==2.2.1
+openai-whisper==20231117  # Local Whisper model (optional)
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+pytest-mock==3.14.0
+
+# Development
+black==25.1.0
+ruff==0.9.1
+mypy==1.14.1
